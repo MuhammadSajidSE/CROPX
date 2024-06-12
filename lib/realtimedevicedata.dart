@@ -59,6 +59,10 @@ class _MyBluetoothAppState extends State<MyBluetoothApp> {
   String addnitstr = " ";
   String addphosstr = " ";
   String addpotstr = " ";
+  String nitrogenvalues = " ";
+  String potasiumvalues = " ";
+  String phosphorusvalues = " ";
+
   List<Map<String, String>> receivedDataList = [];
   List recivedsnapshot = [];
   Map<String, String> avgMap = {};
@@ -169,38 +173,69 @@ class _MyBluetoothAppState extends State<MyBluetoothApp> {
     }
   }
 
+  //
   Future<void> connectToDevice() async {
-    BluetoothDevice selectedDevice =
-        (await FlutterBluetoothSerial.instance.getBondedDevices()).firstWhere(
-      (device) => device.address == esp32SensorMacAddress,
-      orElse: () => throw Exception('Device not found'),
-    );
-
-    await BluetoothConnection.toAddress(selectedDevice.address)
-        .then((BluetoothConnection connection) {
-      print('Connected to the device');
-      setState(() {
-        this._connection = connection;
-        this.connectedDevice = selectedDevice;
-        _dataStreamSubscription = connection.input?.listen(
-          _onDataReceived,
-          onDone: () {
-            print('Data stream closed.');
-          },
-          onError: (error) {
-            print('Data stream error: $error');
-          },
-        );
-
-        setState(() {
-          _connection = connection;
-          isConnected = true;
-          isLoading = false;
-        });
-      });
-    }).catchError((error) {
-      print('Error connecting to the device: $error');
+    setState(() {
+      isLoading = true;
     });
+
+    try {
+      // Fetch a list of bonded Bluetooth devices
+      List<BluetoothDevice> devices =
+          await FlutterBluetoothSerial.instance.getBondedDevices();
+
+      // Show a dialog to let the user select a device
+      BluetoothDevice? selectedDevice = await showDialog<BluetoothDevice>(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: Text('Select a Bluetooth Device'),
+            content: SingleChildScrollView(
+              child: ListBody(
+                children: devices
+                    .map((device) => ListTile(
+                          title: Text(device.name.toString()),
+                          onTap: () {
+                            Navigator.pop(context, device);
+                          },
+                        ))
+                    .toList(),
+              ),
+            ),
+          );
+        },
+      );
+
+      if (selectedDevice == null) {
+        throw Exception('No device selected');
+      }
+
+      // Establish a connection to the selected device
+      BluetoothConnection connection =
+          await BluetoothConnection.toAddress(selectedDevice.address);
+
+      // Set up data stream subscription
+      _dataStreamSubscription = connection.input!.listen(
+        _onDataReceived,
+        onDone: () {
+          print('Data stream closed.');
+        },
+        onError: (error) {
+          print('Data stream error: $error');
+        },
+      );
+
+      setState(() {
+        _connection = connection;
+        connectedDevice = selectedDevice;
+        isConnected = true;
+        isLoading = false;
+      });
+
+      print('Connected to the device');
+    } catch (error) {
+      print('Error connecting to the device: $error');
+    }
   }
 
   Future<void> disconnectFromDevice() async {
@@ -571,6 +606,16 @@ class _MyBluetoothAppState extends State<MyBluetoothApp> {
                                             "longitude": avgMap["longitude"],
                                             "latitude": avgMap["latitude"],
                                           });
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                  'Your data has been saved on firebase!'),
+                                              duration: Duration(seconds: 2),
+                                              backgroundColor: Color.fromARGB(
+                                                  255, 0x00, 0x60, 0x4F),
+                                            ),
+                                          );
                                         } catch (e) {
                                           print("{e}");
                                         }
@@ -584,6 +629,15 @@ class _MyBluetoothAppState extends State<MyBluetoothApp> {
                                         print("\n");
                                         List<Map<String, String>> counterList =
                                             await readCounter(context);
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                              content: Text(
+                                                  'Your data has been saved on txt!'),
+                                              duration: Duration(seconds: 2),
+                                              backgroundColor: Color.fromARGB(
+                                                  255, 0x00, 0x60, 0x4F)),
+                                        );
                                       }
                                     }
                                   });
@@ -614,8 +668,40 @@ class _MyBluetoothAppState extends State<MyBluetoothApp> {
                               if (snapshot.data != addnitstr) {
                                 addnitstr = snapshot.data ?? '';
                               }
-                              return Info(': mg/Kg نائٹروجن',
-                                  isConnected ? snapshot.data ?? '' : "");
+                              String nitrogenvalues = ' ';
+                              if (isConnected) {
+                                final data = snapshot.data;
+                                if (data != null) {
+                                  final parsedData = int.tryParse(data);
+                                  if (parsedData != null) {
+                                    if (parsedData < 100) {
+                                      nitrogenvalues = 'extremely low';
+                                    }
+                                    else if (parsedData >= 100 &&
+                                        parsedData <= 200) {
+                                      nitrogenvalues = 'low';
+                                    }
+                                     else if (parsedData >= 201 &&
+                                        parsedData <= 300) {
+                                      nitrogenvalues = 'medium';
+                                    }
+                                     else if (parsedData > 300) {
+                                      nitrogenvalues = 'high';
+                                    } else {
+                                      nitrogenvalues = parsedData.toString();
+                                    }
+                                  } else {
+                                    nitrogenvalues =
+                                        data; // if parsing fails, just display the data as it is
+                                  }
+                                } else {
+                                  nitrogenvalues = '';
+                                }
+                              } else {
+                                nitrogenvalues = '';
+                              }
+
+                              return Info(': mg/Kg نائٹروجن', nitrogenvalues);
                             },
                           ),
                           StreamBuilder<String>(
@@ -623,11 +709,41 @@ class _MyBluetoothAppState extends State<MyBluetoothApp> {
                             initialData: '',
                             builder: (context, snapshot) {
                               phosphorusValue = snapshot.data ?? '';
-                              if (snapshot.data != addphosstr) {
-                                addphosstr = snapshot.data ?? '';
+                              if (snapshot.data != addnitstr) {
+                                addnitstr = snapshot.data ?? '';
                               }
-                              return Info(': mg/Kg فاسفورس',
-                                  isConnected ? snapshot.data ?? '' : "");
+                              String phosphorvalues = ' ';
+                              if (isConnected) {
+                                final data = snapshot.data;
+                                if (data != null) {
+                                  final parsedData = int.tryParse(data);
+                                  if (parsedData != null) {
+                                    if (parsedData < 30) {
+                                      phosphorvalues = 'extremely low';
+                                    } else if (parsedData > 91) {
+                                      phosphorvalues = 'high';
+                                    } else if (parsedData >= 61 &&
+                                        parsedData <= 90) {
+                                      phosphorvalues = 'medium';
+                                    } 
+                                     else if (parsedData >= 30 &&
+                                        parsedData <= 60) {
+                                      phosphorvalues = 'low';
+                                    }else {
+                                      phosphorvalues = parsedData.toString();
+                                    }
+                                  } else {
+                                    phosphorvalues =
+                                        data; // if parsing fails, just display the data as it is
+                                  }
+                                } else {
+                                  phosphorvalues = '';
+                                }
+                              } else {
+                                phosphorvalues = '';
+                              }
+
+                              return Info(': mg/Kg نائٹروجن', phosphorvalues);
                             },
                           ),
                           StreamBuilder<String>(
@@ -635,11 +751,44 @@ class _MyBluetoothAppState extends State<MyBluetoothApp> {
                             initialData: '',
                             builder: (context, snapshot) {
                               potassiumValue = snapshot.data ?? '';
-                              if (snapshot.data != addpotstr) {
-                                addpotstr = snapshot.data ?? '';
+                              if (snapshot.data != addnitstr) {
+                                addnitstr = snapshot.data ?? '';
                               }
-                              return Info(': mg/Kg پوٹاشیم',
-                                  isConnected ? snapshot.data ?? '' : "");
+                              String potashvalues = ' ';
+                              if (isConnected) {
+                                final data = snapshot.data;
+                                if (data != null) {
+                                  final parsedData = int.tryParse(data);
+                                  if (parsedData != null) {
+                                    if (parsedData < 80) {
+                                      potashvalues = 'extremely low';
+                                    } 
+                                     else if (parsedData >= 80 &&
+                                        parsedData <= 160) {
+                                      potashvalues = 'low';
+                                    }
+                                    else if (parsedData >= 161 &&
+                                        parsedData <= 240) {
+                                      potashvalues = 'medium';
+                                    }
+                                    else if (parsedData > 240) {
+                                      potashvalues = 'high';
+                                    } 
+                                    else {
+                                      potashvalues = parsedData.toString();
+                                    }
+                                  } else {
+                                    potashvalues =
+                                        data; // if parsing fails, just display the data as it is
+                                  }
+                                } else {
+                                  potashvalues = '';
+                                }
+                              } else {
+                                potashvalues = '';
+                              }
+
+                              return Info(': mg/Kg پوٹاشیم', potashvalues);
                             },
                           ),
                         ],
